@@ -48,7 +48,16 @@
     .input-field {
       width: 100%; padding: 10px 10px 8px 40px; background: transparent; border: none;
       border-bottom: 1px solid white; color: white; font-size: 16px;
+      /* --- MODIFICACIONES CLAVE --- */
+      outline: none; /* 1. Quitar el recuadro feo por defecto */
+      transition: border-bottom-color 0.2s; /* 2. Transición para un foco suave */
     }
+    .input-field:focus {
+      /* 3. Reemplazar el foco con un borde inferior de color */
+      border-bottom-color: #FFD700; /* Color amarillo/dorado */
+    }
+    /* ------------------------------ */
+
     .input-field::placeholder { color: white; }
     .forgot-link {
       font-size: 14px; color: white; text-decoration: underline; font-weight: bold;
